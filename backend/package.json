@@ -1,0 +1,23 @@
+{
+  "name": "logiclab-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LogicLab 后端：电路求值、环检测、真值表、布尔表达式、卡诺图化简、关卡判定",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0",
+    "vitest": "^2.1.0"
+  }
+}

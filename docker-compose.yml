@@ -1,0 +1,13 @@
+services:
+  logiclab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: logiclab:latest
+    container_name: logiclab
+    ports:
+      - "8080:8080"
+    environment:
+      - NODE_ENV=production
+      - PORT=8080
+    restart: unless-stopped
