@@ -1,16 +1,18 @@
-/** 选中元件的属性编辑：改名、多输入门的输入端口数。 */
+/** 选中元件的属性编辑：改名、多输入门的输入端口数、自定义器件实例信息。 */
 
 import { useEffect, useState } from 'react';
-import type { CircuitComponent } from '../lib/types';
+import type { CircuitComponent, DeviceDefinition } from '../lib/types';
 import type { EditorAction } from '../lib/editor';
 
 const MULTI_INPUT_GATES = new Set(['AND', 'OR', 'NAND', 'NOR', 'XOR', 'XNOR']);
 
 export function PropertyPanel({
   component,
+  definition,
   dispatch
 }: {
   component: CircuitComponent | null;
+  definition?: DeviceDefinition | null;
   dispatch: (a: EditorAction) => void;
 }) {
   const [label, setLabel] = useState('');
@@ -24,7 +26,8 @@ export function PropertyPanel({
       <div className="panel property-panel">
         <h3>属性</h3>
         <p className="muted">
-          未选中元件。点击元件可选中（再按 Delete 删除）；点击输入开关可在 0/1 间切换。
+          未选中元件。单击选中、Shift+单击追加、Shift+空白拖拽可框选一坨元件后
+          「封装成器件」；双击自定义器件方块可钻入其内部。
         </p>
       </div>
     );
@@ -41,17 +44,38 @@ export function PropertyPanel({
 
   return (
     <div className="panel property-panel">
-      <h3>属性 · {component.type}</h3>
-      <label className="prop-row">
-        <span>名称/变量名</span>
-        <input
-          value={label}
-          placeholder={defaultPlaceholder(component)}
-          onChange={(e) => setLabel(e.target.value)}
-          onBlur={commitLabel}
-          onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
-        />
-      </label>
+      <h3>
+        属性 · {component.type === 'CUSTOM' && definition ? definition.name : component.type}
+      </h3>
+
+      {component.type === 'CUSTOM' && definition && (
+        <div className="custom-instance-info">
+          <div className="prop-row">
+            <span>器件</span>
+            <strong>{definition.name}</strong>
+          </div>
+          <div className="prop-row muted">
+            {definition.inputs.length} 个输入管脚 / {definition.outputs.length} 个输出管脚
+          </div>
+          <p className="muted">
+            实例只是引用：双击方块（或点左侧器件库「管理 → 钻入编辑」）修改内部电路后，
+            所有同类实例都会一起更新。
+          </p>
+        </div>
+      )}
+
+      {component.type !== 'CUSTOM' && (
+        <label className="prop-row">
+          <span>名称/变量名</span>
+          <input
+            value={label}
+            placeholder={defaultPlaceholder(component)}
+            onChange={(e) => setLabel(e.target.value)}
+            onBlur={commitLabel}
+            onKeyDown={(e) => e.key === 'Enter' && (e.target as HTMLInputElement).blur()}
+          />
+        </label>
+      )}
 
       {multi && (
         <label className="prop-row">
@@ -89,7 +113,7 @@ export function PropertyPanel({
         className="danger-btn"
         onClick={() => dispatch({ type: 'delete-selected' })}
       >
-        删除选中{component.type === 'INPUT' || component.type === 'OUTPUT' ? '元件' : '门'}
+        删除选中{component.type === 'INPUT' || component.type === 'OUTPUT' ? '元件' : component.type === 'CUSTOM' ? '实例（定义保留）' : '门'}
       </button>
     </div>
   );

@@ -7,7 +7,8 @@
 
 import { evaluate } from './evaluate.js';
 import { validateCircuit } from './graph.js';
-import type { Circuit } from './types.js';
+import { definitionMap } from './definitions.js';
+import type { Circuit, DeviceDefinition } from './types.js';
 
 export interface Level {
   id: string;
@@ -27,6 +28,8 @@ export interface Level {
 export interface LevelVerifyRequest {
   levelId: string;
   circuit: Circuit;
+  /** 学生用自定义器件搭电路时随请求带上的器件定义表 */
+  definitions?: DeviceDefinition[];
 }
 
 export interface LevelVerifyOk {
@@ -145,7 +148,9 @@ export function verifyLevel(req: LevelVerifyRequest): LevelVerifyResult {
   if (!level) return { ok: false, message: `关卡不存在: ${req.levelId}` };
 
   const circuit: Circuit = req.circuit;
-  const v = validateCircuit(circuit);
+  const defLookup =
+    req.definitions && req.definitions.length > 0 ? definitionMap(req.definitions) : undefined;
+  const v = validateCircuit(circuit, defLookup);
   if (v) return { ok: false, message: v.message };
 
   // 按画面位置（先 x 后 y）排序，使变量/输出对应关系可预测
@@ -183,14 +188,11 @@ export function verifyLevel(req: LevelVerifyRequest): LevelVerifyResult {
     for (let i = 0; i < n; i++) {
       assignment[inputIds[i]] = ((m >> (n - 1 - i)) & 1) as 0 | 1;
     }
-    const result = evaluate(circuit, assignment);
+    const result = evaluate(circuit, assignment, req.definitions);
     if (!result.ok) {
       return {
         ok: false,
-        message:
-          result.error.kind === 'cycle'
-            ? result.error.message
-            : result.error.message,
+        message: result.error.message,
         cyclePath: result.error.kind === 'cycle' ? result.error.path : undefined
       };
     }

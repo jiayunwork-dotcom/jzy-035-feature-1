@@ -75,7 +75,11 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
       sendJson(res, 400, { ok: false, message: '缺少 circuit' });
       return true;
     }
-    sendJson(res, 200, evaluate(circuit, data?.inputValues ?? undefined));
+    sendJson(
+      res,
+      200,
+      evaluate(circuit, data?.inputValues ?? undefined, data?.definitions ?? undefined)
+    );
     return true;
   }
 
@@ -83,7 +87,8 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
     const result = buildTruthTable({
       circuit: data?.circuit,
       inputIds: data?.inputIds ?? [],
-      outputIds: data?.outputIds ?? []
+      outputIds: data?.outputIds ?? [],
+      definitions: data?.definitions ?? undefined
     });
     if (result.ok && data?.format === 'csv') {
       res.writeHead(200, {
@@ -102,7 +107,8 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
     const result = extractExpressions({
       circuit: data?.circuit,
       inputIds: data?.inputIds ?? [],
-      outputIds: data?.outputIds ?? []
+      outputIds: data?.outputIds ?? [],
+      definitions: data?.definitions ?? undefined
     });
     sendJson(res, result.ok ? 200 : 400, result);
     return true;
@@ -112,7 +118,8 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
     const result = buildKarnaugh({
       circuit: data?.circuit,
       inputIds: data?.inputIds ?? [],
-      outputId: data?.outputId
+      outputId: data?.outputId,
+      definitions: data?.definitions ?? undefined
     });
     sendJson(res, result.ok ? 200 : 400, result);
     return true;
@@ -134,7 +141,11 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
   }
 
   if (pathname === '/api/levels/verify') {
-    const result = verifyLevel({ levelId: data?.levelId, circuit: data?.circuit });
+    const result = verifyLevel({
+      levelId: data?.levelId,
+      circuit: data?.circuit,
+      definitions: data?.definitions ?? undefined
+    });
     sendJson(res, result.ok === false ? 400 : 200, result);
     return true;
   }

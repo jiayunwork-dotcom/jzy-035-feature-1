@@ -11,7 +11,8 @@
 
 import { evaluate } from './evaluate.js';
 import { validateCircuit } from './graph.js';
-import type { Circuit, Signal } from './types.js';
+import { definitionMap } from './definitions.js';
+import type { Circuit, DeviceDefinition, Signal } from './types.js';
 
 export const TRUTH_TABLE_WARN_VARS = 10;
 export const MAX_TRUTH_TABLE_VARS = 20;
@@ -20,6 +21,8 @@ export interface TruthTableRequest {
   circuit: Circuit;
   inputIds: string[];
   outputIds: string[];
+  /** 电路中 CUSTOM 实例引用的器件定义表；缺省即旧版扁平电路 */
+  definitions?: DeviceDefinition[];
 }
 
 export interface TruthTableRow {
@@ -50,8 +53,9 @@ export interface TruthTableErr {
 export type TruthTableResult = TruthTableOk | TruthTableErr;
 
 export function buildTruthTable(req: TruthTableRequest): TruthTableResult {
-  const { circuit, inputIds, outputIds } = req;
-  const v = validateCircuit(circuit);
+  const { circuit, inputIds, outputIds, definitions } = req;
+  const defLookup = definitions && definitions.length > 0 ? definitionMap(definitions) : undefined;
+  const v = validateCircuit(circuit, defLookup);
   if (v) return { ok: false, message: v.message };
 
   const compById = new Map(circuit.components.map((c) => [c.id, c]));
@@ -96,13 +100,11 @@ export function buildTruthTable(req: TruthTableRequest): TruthTableResult {
       inputAssignment[inputIds[i]] = bit as 0 | 1;
     }
 
-    const result = evaluate(circuit, inputAssignment);
+    const result = evaluate(circuit, inputAssignment, definitions);
     if (!result.ok) {
       return {
         ok: false,
-        message: result.error.kind === 'cycle'
-          ? result.error.message
-          : result.error.message,
+        message: result.error.message,
         cyclePath: result.error.kind === 'cycle' ? result.error.path : undefined
       };
     }

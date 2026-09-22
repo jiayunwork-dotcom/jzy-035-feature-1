@@ -19,7 +19,7 @@ import {
   type Term
 } from './minimizer.js';
 import { buildTruthTable, type TruthTableResult } from './truthTable.js';
-import type { Circuit } from './types.js';
+import type { Circuit, DeviceDefinition } from './types.js';
 
 export const KMAP_MIN_VARS = 2;
 export const KMAP_MAX_VARS = 4;
@@ -75,6 +75,7 @@ export interface KMapRequest {
   circuit: Circuit;
   inputIds: string[];
   outputId: string;
+  definitions?: DeviceDefinition[];
 }
 
 export function buildKarnaugh(req: KMapRequest): KMapResult {
@@ -82,7 +83,8 @@ export function buildKarnaugh(req: KMapRequest): KMapResult {
   const tt: TruthTableResult = buildTruthTable({
     circuit: req.circuit,
     inputIds: req.inputIds,
-    outputIds
+    outputIds,
+    definitions: req.definitions
   });
   if (!tt.ok) {
     return { ok: false, message: tt.message, cyclePath: tt.cyclePath };

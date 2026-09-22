@@ -8,6 +8,7 @@ import { useState } from 'react';
 import { fetchKarnaugh } from '../lib/api';
 import type {
   CircuitComponent,
+  DeviceDefinition,
   GenericErr,
   KMapGroup,
   KMapOk
@@ -29,10 +30,12 @@ const GROUP_COLORS = [
 
 export function KarnaughPanel({
   components,
-  wires
+  wires,
+  definitions
 }: {
   components: CircuitComponent[];
   wires: import('../lib/types').Wire[];
+  definitions?: DeviceDefinition[];
 }) {
   const inputs = components.filter((c) => c.type === 'INPUT');
   const outputs = components.filter((c) => c.type === 'OUTPUT');
@@ -70,7 +73,8 @@ export function KarnaughPanel({
       const result = await fetchKarnaugh(
         { components, wires },
         inputIds,
-        chosenOutput
+        chosenOutput,
+        definitions
       );
       if (!result.ok) {
         const e = result as GenericErr;

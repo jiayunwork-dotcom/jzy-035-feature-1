@@ -1,6 +1,6 @@
-/** 左侧元件工具栏：拖拽或点击均可放置到画布。 */
+/** 左侧器件库：内置门 / 输入输出 / 自定义器件，拖拽或点击均可放置到画布。 */
 
-import type { ComponentType, GateType } from '../lib/types';
+import type { ComponentType, DeviceDefinition, GateType } from '../lib/types';
 
 interface ToolItem {
   type: ComponentType;
@@ -25,10 +25,16 @@ const IOS: ToolItem[] = [
 
 export function Toolbar({
   onAddGate,
-  onAddIO
+  onAddIO,
+  definitions,
+  onAddInstance,
+  onManageDefinitions
 }: {
   onAddGate: (t: GateType) => void;
   onAddIO: (t: 'INPUT' | 'OUTPUT') => void;
+  definitions: DeviceDefinition[];
+  onAddInstance: (d: DeviceDefinition) => void;
+  onManageDefinitions?: () => void;
 }) {
   return (
     <aside className="toolbar">
@@ -48,10 +54,47 @@ export function Toolbar({
           />
         ))}
       </div>
+
+      <div className="toolbar-section-title">
+        自定义器件（{definitions.length}）
+        {onManageDefinitions && (
+          <button className="link-btn" onClick={onManageDefinitions} title="管理器件">
+            管理
+          </button>
+        )}
+      </div>
+      <div className="toolbar-grid">
+        {definitions.length === 0 && (
+          <p className="toolbar-hint">
+            在画布上 Shift+拖拽框选一坨电路（含输入开关和输出灯），点顶部
+            <b>「封装成器件」</b>即可生成可复用器件；双击实例可钻入内部修改。
+          </p>
+        )}
+        {definitions.map((d) => (
+          <button
+            key={d.id}
+            className="tool-button custom-tool"
+            draggable
+            onDragStart={(e) => {
+              e.dataTransfer.setData('application/x-definition-id', d.id);
+              e.dataTransfer.effectAllowed = 'copy';
+            }}
+            onClick={() => onAddInstance(d)}
+            title={`${d.name}：${d.inputs.length} 输入 / ${d.outputs.length} 输出`}
+          >
+            <span className="tool-symbol custom-symbol">▣</span>
+            <span className="tool-name">{d.name}</span>
+            <span className="tool-sub">
+              {d.inputs.length}入 / {d.outputs.length}出
+            </span>
+          </button>
+        ))}
+      </div>
+
       <p className="toolbar-hint">
         拖到画布放置，或点击后自动放到画布中央。
         <br />
-        多输入门（与/或/…）选中后可在右侧改输入个数。
+        多输入门选中后可在右侧改输入个数。
       </p>
     </aside>
   );
@@ -86,5 +129,6 @@ function symbolOf(t: ComponentType): string {
     case 'XNOR': return '⊙';
     case 'INPUT': return '⇥';
     case 'OUTPUT': return '◉';
+    case 'CUSTOM': return '▣';
   }
 }

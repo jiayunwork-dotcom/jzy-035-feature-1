@@ -9,7 +9,7 @@ export type GateType =
   | 'XOR'
   | 'XNOR';
 
-export type ComponentType = GateType | 'INPUT' | 'OUTPUT';
+export type ComponentType = GateType | 'INPUT' | 'OUTPUT' | 'CUSTOM';
 
 export interface PortRef {
   componentId: string;
@@ -24,6 +24,8 @@ export interface CircuitComponent {
   label?: string;
   value?: 0 | 1;
   inputCount?: number;
+  /** CUSTOM 实例引用的器件定义 id */
+  definitionId?: string;
 }
 
 export interface Wire {
@@ -37,11 +39,35 @@ export interface Circuit {
   wires: Wire[];
 }
 
+/** 器件管脚：下标即端口号，componentId 指向定义内部的 INPUT/OUTPUT 元件 */
+export interface PinDef {
+  id: string;
+  name?: string;
+  componentId: string;
+}
+
+/** 可复用的自定义器件定义 */
+export interface DeviceDefinition {
+  id: string;
+  name: string;
+  inputs: PinDef[];
+  outputs: PinDef[];
+  circuit: Circuit;
+}
+
+/** v2 工程：顶层电路 + 器件定义表（v1 旧文件是裸 Circuit） */
+export interface Project {
+  version: 2;
+  circuit: Circuit;
+  definitions: DeviceDefinition[];
+}
+
 export type Signal = 0 | 1 | null;
 
 export interface EvalResultOk {
   ok: true;
   outputs: Record<string, Signal>;
+  instanceOutputs: Record<string, Signal[]>;
   wireValues: Record<string, Signal>;
   order: string[];
 }
@@ -49,8 +75,9 @@ export interface EvalResultOk {
 export interface EvalResultErr {
   ok: false;
   error: {
-    kind: 'cycle' | 'validation';
+    kind: 'cycle' | 'validation' | 'definition-cycle';
     path?: string[];
+    layer?: string | null;
     message: string;
   };
 }

@@ -149,3 +149,86 @@ export const OutputLampSymbol = memo(function OutputLampSymbol({
     </g>
   );
 });
+
+/**
+ * 自定义器件实例方块：内部细节收起，只显示器件名与管脚。
+ * 管脚圆点仍由 Canvas 统一绘制，这里只画方块、标题与管脚名。
+ */
+export const CustomDeviceSymbol = memo(function CustomDeviceSymbol({
+  name,
+  inputNames,
+  outputNames,
+  active,
+  selected
+}: {
+  name: string;
+  inputNames: string[];
+  outputNames: string[];
+  /** 第 0 个输出管脚是否为 1（整体高亮） */
+  active?: boolean;
+  selected?: boolean;
+}) {
+  const width = 110;
+  const pinGap = 22;
+  const padTop = 34;
+  const minHeight = 70;
+  const height = Math.max(minHeight, padTop + Math.max(inputNames.length, outputNames.length) * pinGap + 12);
+  const stroke = selected ? '#ffd166' : active ? STROKE_ACTIVE : STROKE;
+  return (
+    <g>
+      <rect
+        x={1}
+        y={1}
+        width={width - 2}
+        height={height - 2}
+        rx={8}
+        fill="#202c3d"
+        stroke={stroke}
+        strokeWidth={selected ? 2.4 : 1.8}
+      />
+      <line x1={1} y1={padTop - 8} x2={width - 1} y2={padTop - 8} stroke="#33415a" strokeWidth={1} />
+      <text
+        x={width / 2}
+        y={18}
+        textAnchor="middle"
+        fontSize={12}
+        fontWeight="bold"
+        fill={active ? '#7cc0ff' : '#dbe6f5'}
+        style={{ userSelect: 'none' }}
+      >
+        {name.length > 10 ? name.slice(0, 9) + '…' : name}
+      </text>
+      {inputNames.map((n, i) => {
+        const y = inputNames.length <= 1 ? height / 2 : padTop + i * pinGap + pinGap / 2;
+        return (
+          <text
+            key={`in-${i}`}
+            x={8}
+            y={y + 4}
+            fontSize={11}
+            fill="#9fb0c3"
+            style={{ userSelect: 'none' }}
+          >
+            {n}
+          </text>
+        );
+      })}
+      {outputNames.map((n, i) => {
+        const y = outputNames.length <= 1 ? height / 2 : padTop + i * pinGap + pinGap / 2;
+        return (
+          <text
+            key={`out-${i}`}
+            x={width - 8}
+            y={y + 4}
+            textAnchor="end"
+            fontSize={11}
+            fill="#9fb0c3"
+            style={{ userSelect: 'none' }}
+          >
+            {n}
+          </text>
+        );
+      })}
+    </g>
+  );
+});

@@ -1,17 +1,20 @@
 /**
  * 网格画布：
  *  - 滚轮缩放（以光标为中心）、空白处拖拽平移；
- *  - 工具栏 HTML5 拖入放置新元件；
+ *  - 工具栏 HTML5 拖入放置新元件（含自定义器件实例）；
  *  - 点元件拖动（网格吸附）移动、点开关直接翻转；
- *  - 从输出口按下拖到合法输入口松手才连线，非法连线松手即取消；
- *  - 点击选中元件/线，Delete/Backspace 删除；
+ *  - 框选：Shift（或框选模式）下在空白处拖出矩形，圈住元件多选；
+ *    普通空白拖拽仍是平移，单击元件为单选、Shift 单击追加/取消；
+ *  - 从输出口按下拖到合法输入口松手才连线（自定义器件多输出口按端口号），
+ *    非法连线松手即取消；连线照旧只允许输出口 -> 输入口；
+ *  - 双击 CUSTOM 实例钻入其定义内部；
  *  - 连线为曼哈顿折线，按信号着色（1 绿、0 灰蓝、未知虚灰）。
  */
 
 import { useCallback, useRef, useState } from 'react';
 import type {
   CircuitComponent,
-  ComponentType,
+  DeviceDefinition,
   EvalResult,
   Signal,
   Wire
@@ -20,18 +23,23 @@ import type { EditorAction } from '../lib/editor';
 import {
   COMP_HEIGHT,
   COMP_WIDTH,
+  CUSTOM_WIDTH,
   componentAt,
   componentHeight,
+  componentsInRect,
   hitTestInputPort,
   hitTestOutputPort,
   inputPortCount,
   outputPortCount,
+  pinLabel,
   portPosition,
   routeWire,
-  snap
+  snap,
+  type DefinitionLookup
 } from '../lib/geometry';
 import { uid } from '../lib/utils';
 import {
+  CustomDeviceSymbol,
   GateSymbol,
   InputSwitchSymbol,
   OutputLampSymbol
@@ -40,8 +48,9 @@ import {
 interface CanvasProps {
   components: CircuitComponent[];
   wires: Wire[];
+  definitions: DeviceDefinition[];
   evalResult: EvalResult | null;
-  selectedComponentId: string | null;
+  selectedComponentIds: string[];
   selectedWireId: string | null;
   dispatch: (a: EditorAction) => void;
 }
@@ -54,6 +63,7 @@ interface View {
 
 interface Wiring {
   fromId: string;
+  fromPort: number;
   fromPos: { x: number; y: number };
   cursor: { x: number; y: number };
   hoverPort: { componentId: string; port: number } | null;
@@ -66,6 +76,12 @@ interface Dragging {
   moved: boolean;
 }
 
+interface Marquee {
+  start: { x: number; y: number };
+  current: { x: number; y: number };
+  additive: boolean;
+}
+
 const MIN_SCALE = 0.4;
 const MAX_SCALE = 2.2;
 
@@ -76,13 +92,19 @@ function wireStyle(signal: Signal): { stroke: string; dash?: string } {
 }
 
 export function Canvas(props: CanvasProps) {
-  const { components, wires, evalResult, selectedComponentId, selectedWireId, dispatch } = props;
+  const { components, wires, definitions, evalResult, selectedComponentIds, selectedWireId, dispatch } = props;
+  const defs: DefinitionLookup = new Map(definitions.map((d) => [d.id, d]));
   const svgRef = useRef<SVGSVGElement | null>(null);
   const [view, setView] = useState<View>({ scale: 1, tx: 40, ty: 40 });
   const [wiring, setWiring] = useState<Wiring | null>(null);
   const draggingRef = useRef<Dragging | null>(null);
   const panningRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null);
+  const marqueeRef = useRef<Marquee | null>(null);
+  const [marqueeTick, setMarqueeTick] = useState(0);
   const [, forceTick] = useState(0);
+  const clickTimeRef = useRef<{ id: string; t: number } | null>(null);
+
+  const selectionSet = new Set(selectedComponentIds);
 
   const toWorld = useCallback(
     (clientX: number, clientY: number) => {
@@ -103,7 +125,6 @@ export function Canvas(props: CanvasProps) {
     const factor = e.deltaY < 0 ? 1.12 : 1 / 1.12;
     setView((v) => {
       const scale = Math.min(MAX_SCALE, Math.max(MIN_SCALE, v.scale * factor));
-      // 以光标为缩放中心
       const wx = (mx - v.tx) / v.scale;
       const wy = (my - v.ty) / v.scale;
       return { scale, tx: mx - wx * scale, ty: my - wy * scale };
@@ -114,13 +135,14 @@ export function Canvas(props: CanvasProps) {
     if (e.button !== 0) return;
     const world = toWorld(e.clientX, e.clientY);
 
-    // 1. 是否点在输出端口上 -> 开始拉线
-    const outPort = hitTestOutputPort(components, world);
+    // 1. 输出端口 -> 开始拉线
+    const outPort = hitTestOutputPort(components, world, defs);
     if (outPort) {
       const c = components.find((x) => x.id === outPort.componentId)!;
       setWiring({
         fromId: c.id,
-        fromPos: portPosition(c, 'out'),
+        fromPort: outPort.port,
+        fromPos: portPosition(c, 'out', outPort.port, defs),
         cursor: world,
         hoverPort: null
       });
@@ -128,11 +150,17 @@ export function Canvas(props: CanvasProps) {
       return;
     }
 
-    // 2. 是否点在元件体上
-    const hit = componentAt(components, world);
+    // 2. 元件体：选择 / 拖动 / 双击钻入
+    const hit = componentAt(components, world, defs);
     if (hit) {
-      dispatch({ type: 'select', componentId: hit.id, wireId: null });
-      // 输入开关：点击即翻转（按下时不翻转，交给 click，避免拖动误触）
+      if (e.shiftKey) {
+        const next = selectionSet.has(hit.id)
+          ? selectedComponentIds.filter((id) => id !== hit.id)
+          : [...selectedComponentIds, hit.id];
+        dispatch({ type: 'select', componentIds: next, wireId: null });
+      } else if (!selectionSet.has(hit.id)) {
+        dispatch({ type: 'select', componentIds: [hit.id], wireId: null });
+      }
       draggingRef.current = {
         id: hit.id,
         pointerStart: { x: e.clientX, y: e.clientY },
@@ -143,9 +171,14 @@ export function Canvas(props: CanvasProps) {
       return;
     }
 
-    // 3. 点空白：开始平移并清空选择（不立即清，拖动才算平移；单击空白也清）
-    dispatch({ type: 'select', componentId: null, wireId: null });
-    panningRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
+    // 3. 空白：Shift 拖拽 = 框选；否则平移并清空选择
+    if (e.shiftKey) {
+      marqueeRef.current = { start: world, current: world, additive: false };
+      setMarqueeTick((n) => n + 1);
+    } else {
+      dispatch({ type: 'select', componentIds: [], wireId: null });
+      panningRef.current = { x: e.clientX, y: e.clientY, tx: view.tx, ty: view.ty };
+    }
     (e.currentTarget as Element).setPointerCapture(e.pointerId);
   };
 
@@ -153,7 +186,7 @@ export function Canvas(props: CanvasProps) {
     const world = toWorld(e.clientX, e.clientY);
 
     if (wiring) {
-      const hover = hitTestInputPort(components, world);
+      const hover = hitTestInputPort(components, world, defs);
       const legal =
         hover &&
         hover.componentId !== wiring.fromId &&
@@ -182,6 +215,12 @@ export function Canvas(props: CanvasProps) {
       return;
     }
 
+    if (marqueeRef.current) {
+      marqueeRef.current.current = world;
+      setMarqueeTick((n) => n + 1);
+      return;
+    }
+
     const p = panningRef.current;
     if (p) {
       setView((v) => ({ ...v, tx: p.tx + (e.clientX - p.x), ty: p.ty + (e.clientY - p.y) }));
@@ -193,13 +232,32 @@ export function Canvas(props: CanvasProps) {
       if (wiring.hoverPort) {
         const wire: Wire = {
           id: uid('w'),
-          from: { componentId: wiring.fromId, port: 0 },
+          from: { componentId: wiring.fromId, port: wiring.fromPort },
           to: { componentId: wiring.hoverPort.componentId, port: wiring.hoverPort.port }
         };
         dispatch({ type: 'add-wire', wire });
       }
-      // 落歪：直接取消，无任何变化
       setWiring(null);
+      return;
+    }
+
+    if (marqueeRef.current) {
+      const m = marqueeRef.current;
+      const rect = {
+        x: Math.min(m.start.x, m.current.x),
+        y: Math.min(m.start.y, m.current.y),
+        w: Math.abs(m.current.x - m.start.x),
+        h: Math.abs(m.current.y - m.start.y)
+      };
+      if (rect.w > 4 || rect.h > 4) {
+        const hitIds = componentsInRect(components, rect, defs);
+        const merged = m.additive
+          ? [...new Set([...selectedComponentIds, ...hitIds])]
+          : hitIds;
+        dispatch({ type: 'select', componentIds: merged, wireId: null });
+      }
+      marqueeRef.current = null;
+      setMarqueeTick((n) => n + 1);
       return;
     }
 
@@ -216,10 +274,20 @@ export function Canvas(props: CanvasProps) {
           startY: d.compStart.y
         });
       } else {
-        // 没有发生移动：若是输入开关则翻转 0/1
         const c = components.find((x) => x.id === d.id);
-        if (c?.type === 'INPUT') {
-          dispatch({ type: 'set-switch', id: c.id, value: c.value === 1 ? 0 : 1 });
+        const now = Date.now();
+        const prev = clickTimeRef.current;
+        if (prev && prev.id === d.id && now - prev.t < 350) {
+          // 双击 CUSTOM 实例 -> 钻入定义
+          if (c?.type === 'CUSTOM' && c.definitionId) {
+            dispatch({ type: 'drill-in', definitionId: c.definitionId });
+          }
+          clickTimeRef.current = null;
+        } else {
+          clickTimeRef.current = { id: d.id, t: now };
+          if (c?.type === 'INPUT') {
+            dispatch({ type: 'set-switch', id: c.id, value: c.value === 1 ? 0 : 1 });
+          }
         }
       }
       draggingRef.current = null;
@@ -229,9 +297,22 @@ export function Canvas(props: CanvasProps) {
 
   const onDrop = (e: React.DragEvent) => {
     e.preventDefault();
-    const type = e.dataTransfer.getData('application/x-gate-type') as ComponentType;
-    if (!type) return;
+    // 自定义器件
+    const defId = e.dataTransfer.getData('application/x-definition-id');
     const world = toWorld(e.clientX, e.clientY);
+    if (defId) {
+      const comp: CircuitComponent = {
+        id: uid('c'),
+        type: 'CUSTOM',
+        definitionId: defId,
+        x: snap(world.x - CUSTOM_WIDTH / 2),
+        y: snap(world.y - 35)
+      };
+      dispatch({ type: 'add-component', component: comp });
+      return;
+    }
+    const type = e.dataTransfer.getData('application/x-gate-type') as CircuitComponent['type'] | '';
+    if (!type) return;
     const comp: CircuitComponent = {
       id: uid('c'),
       type,
@@ -239,14 +320,18 @@ export function Canvas(props: CanvasProps) {
       y: snap(world.y - COMP_HEIGHT / 2),
       value: type === 'INPUT' ? 0 : undefined,
       inputCount:
-        type !== 'INPUT' && type !== 'OUTPUT' && type !== 'NOT' ? 2 : undefined
+        type !== 'INPUT' && type !== 'OUTPUT' && type !== 'NOT' && type !== 'CUSTOM' ? 2 : undefined
     };
     dispatch({ type: 'add-component', component: comp });
   };
 
   const signalOf = (w: Wire): Signal => {
-    const r: EvalResult | null = evalResult;
-    return r?.ok ? r.wireValues[w.id] ?? null : null;
+    if (!evalResult?.ok) return null;
+    const src = components.find((c) => c.id === w.from.componentId);
+    if (src?.type === 'CUSTOM') {
+      return evalResult.instanceOutputs[src.id]?.[w.from.port] ?? null;
+    }
+    return evalResult.wireValues[w.id] ?? null;
   };
 
   const cycleSet = new Set(
@@ -255,7 +340,8 @@ export function Canvas(props: CanvasProps) {
       : []
   );
 
-  const selectedComp = components.find((c) => c.id === selectedComponentId) ?? null;
+  const marquee = marqueeRef.current;
+  void marqueeTick;
 
   return (
     <svg
@@ -283,14 +369,13 @@ export function Canvas(props: CanvasProps) {
             const from = components.find((c) => c.id === w.from.componentId);
             const to = components.find((c) => c.id === w.to.componentId);
             if (!from || !to) return null;
-            const p1 = portPosition(from, 'out', w.from.port);
-            const p2 = portPosition(to, 'in', w.to.port);
+            const p1 = portPosition(from, 'out', w.from.port, defs);
+            const p2 = portPosition(to, 'in', w.to.port, defs);
             const s = signalOf(w);
             const st = wireStyle(s);
             const isSel = w.id === selectedWireId;
             return (
               <g key={w.id}>
-                {/* 宽一点的透明线，方便点选 */}
                 <path
                   d={routeWire(p1, p2)}
                   stroke="transparent"
@@ -298,7 +383,7 @@ export function Canvas(props: CanvasProps) {
                   style={{ cursor: 'pointer', pointerEvents: 'stroke' }}
                   onPointerDown={(e) => {
                     e.stopPropagation();
-                    dispatch({ type: 'select', componentId: null, wireId: w.id });
+                    dispatch({ type: 'select', componentIds: [], wireId: w.id });
                   }}
                 />
                 <path
@@ -315,7 +400,6 @@ export function Canvas(props: CanvasProps) {
             );
           })}
 
-          {/* 正在拉的临时线 */}
           {wiring && (
             <path
               d={routeWire(wiring.fromPos, wiring.cursor)}
@@ -328,8 +412,8 @@ export function Canvas(props: CanvasProps) {
 
         {/* 输入端口圆点 */}
         {components.map((c) =>
-          Array.from({ length: inputPortCount(c) }, (_, port) => {
-            const pos = portPosition(c, 'in', port);
+          Array.from({ length: inputPortCount(c, defs) }, (_, port) => {
+            const pos = portPosition(c, 'in', port, defs);
             const driven = wires.some(
               (w) => w.to.componentId === c.id && w.to.port === port
             );
@@ -351,8 +435,9 @@ export function Canvas(props: CanvasProps) {
 
         {/* 元件层 */}
         {components.map((c) => {
-          const selected = c.id === selectedComponentId;
+          const selected = selectionSet.has(c.id);
           const inCycle = cycleSet.has(c.id);
+          const def = c.type === 'CUSTOM' ? defs.get(c.definitionId!) : undefined;
           return (
             <g
               key={c.id}
@@ -361,12 +446,12 @@ export function Canvas(props: CanvasProps) {
             >
               <ComponentBody
                 c={c}
+                def={def}
                 selected={selected}
                 dimmed={inCycle}
                 signal={evalResult?.ok ? evalResult.outputs[c.id] ?? null : null}
               />
-              {/* 可编辑标签 */}
-              {c.type !== 'INPUT' && c.type !== 'OUTPUT' && (
+              {c.type !== 'INPUT' && c.type !== 'OUTPUT' && c.type !== 'CUSTOM' && (
                 <text
                   x={COMP_WIDTH / 2}
                   y={-6}
@@ -380,7 +465,7 @@ export function Canvas(props: CanvasProps) {
               )}
               {(c.type === 'INPUT' || c.type === 'OUTPUT') && (
                 <text
-                  x={c.type === 'INPUT' ? 26 : 26}
+                  x={26}
                   y={c.type === 'INPUT' ? COMP_HEIGHT + 14 : -8}
                   textAnchor="middle"
                   fontSize={12}
@@ -397,32 +482,54 @@ export function Canvas(props: CanvasProps) {
 
         {/* 输出端口圆点（盖在最上面） */}
         {components.map((c) => {
-          if (outputPortCount(c) === 0) return null;
-          const pos = portPosition(c, 'out');
-          const isWiringSource = wiring?.fromId === c.id;
-          return (
-            <circle
-              key={`out-${c.id}`}
-              cx={pos.x}
-              cy={pos.y}
-              r={isWiringSource ? 6.5 : 5}
-              fill="#0f1620"
-              stroke={isWiringSource ? '#3ddc84' : '#c9d4e3'}
-              strokeWidth={1.6}
-              style={{ cursor: 'crosshair' }}
-            />
-          );
+          const n = outputPortCount(c, defs);
+          return Array.from({ length: n }, (_, port) => {
+            const pos = portPosition(c, 'out', port, defs);
+            const isWiringSource = wiring?.fromId === c.id && wiring.fromPort === port;
+            return (
+              <circle
+                key={`out-${c.id}-${port}`}
+                cx={pos.x}
+                cy={pos.y}
+                r={isWiringSource ? 6.5 : 5}
+                fill="#0f1620"
+                stroke={isWiringSource ? '#3ddc84' : '#c9d4e3'}
+                strokeWidth={1.6}
+                style={{ cursor: 'crosshair' }}
+              />
+            );
+          });
         })}
 
-        {/* 拉线时高亮合法目标端口的提示环 */}
+        {/* 拉线时高亮合法目标端口 */}
         {wiring?.hoverPort &&
           (() => {
             const c = components.find((x) => x.id === wiring.hoverPort!.componentId)!;
-            const pos = portPosition(c, 'in', wiring.hoverPort!.port);
+            const pos = portPosition(c, 'in', wiring.hoverPort!.port, defs);
             return <circle cx={pos.x} cy={pos.y} r={11} fill="none" stroke="#3ddc84" strokeWidth={1.5} strokeDasharray="3 3" />;
           })()}
 
-        {selectedComp && selectedWireId === null && null}
+        {/* 框选矩形 */}
+        {marquee &&
+          (() => {
+            const x = Math.min(marquee.start.x, marquee.current.x);
+            const y = Math.min(marquee.start.y, marquee.current.y);
+            const w = Math.abs(marquee.current.x - marquee.start.x);
+            const h = Math.abs(marquee.current.y - marquee.start.y);
+            return (
+              <rect
+                x={x}
+                y={y}
+                width={w}
+                height={h}
+                fill="rgba(77,163,255,0.12)"
+                stroke="#4da3ff"
+                strokeWidth={1}
+                strokeDasharray="4 3"
+                pointerEvents="none"
+              />
+            );
+          })()}
       </g>
     </svg>
   );
@@ -432,11 +539,13 @@ const GRID_PX = 20;
 
 function ComponentBody({
   c,
+  def,
   selected,
   dimmed,
   signal
 }: {
   c: CircuitComponent;
+  def?: DeviceDefinition;
   selected: boolean;
   dimmed: boolean;
   signal: Signal;
@@ -446,6 +555,17 @@ function ComponentBody({
   }
   if (c.type === 'OUTPUT') {
     return <OutputLampSymbol signal={signal} selected={selected} />;
+  }
+  if (c.type === 'CUSTOM' && def) {
+    return (
+      <CustomDeviceSymbol
+        name={def.name}
+        inputNames={def.inputs.map((p, i) => pinLabel(p, i, 'in'))}
+        outputNames={def.outputs.map((p, i) => pinLabel(p, i, 'out'))}
+        active={signal === 1}
+        selected={selected}
+      />
+    );
   }
   return <GateSymbol type={c.type} active={signal === 1} selected={selected} dimmed={dimmed} height={componentHeight(c)} />;
 }
