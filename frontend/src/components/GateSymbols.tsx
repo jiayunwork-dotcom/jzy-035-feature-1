@@ -2,7 +2,12 @@
  *  宽度固定 90；多输入门高度由 Canvas 按输入数传入，右侧用半椭圆收束。 */
 
 import { memo } from 'react';
-import type { ComponentType } from '../lib/types';
+import type { ComponentType, DeviceDefinition } from '../lib/types';
+import {
+  SUB_PIN_GAP,
+  SUB_PAD_TOP,
+  SUB_WIDTH
+} from '../lib/geometry';
 
 interface SymbolProps {
   type: ComponentType;
@@ -146,6 +151,80 @@ export const OutputLampSymbol = memo(function OutputLampSymbol({
       >
         {signal === null ? '?' : signal}
       </text>
+    </g>
+  );
+});
+
+/**
+ * 自定义器件实例：一个带名字和命名管脚的方块，内部细节收起。
+ * 端口圆点由 Canvas 统一绘制；这里只画方块本体、器件名与管脚名。
+ */
+export const InstanceSymbol = memo(function InstanceSymbol({
+  def,
+  height,
+  selected,
+  active
+}: {
+  def: DeviceDefinition;
+  height: number;
+  selected?: boolean;
+  /** 主输出（0 号端口）为 1 时方块描边高亮 */
+  active?: boolean;
+}) {
+  const stroke = selected ? '#ffd166' : active ? STROKE_ACTIVE : STROKE;
+  const label = def.name;
+  return (
+    <g>
+      <rect
+        x={1}
+        y={1}
+        width={SUB_WIDTH - 2}
+        height={height - 2}
+        rx={8}
+        fill="#1a2433"
+        stroke={stroke}
+        strokeWidth={selected ? 2.4 : 1.8}
+      />
+      {/* 顶部器件名 */}
+      <text
+        x={SUB_WIDTH / 2}
+        y={13}
+        textAnchor="middle"
+        fontSize={11}
+        fontWeight="bold"
+        fill={selected ? '#ffd166' : '#9fc1ff'}
+        style={{ pointerEvents: 'none', userSelect: 'none' }}
+      >
+        {label.length > 12 ? `${label.slice(0, 11)}…` : label}
+      </text>
+      <line x1={10} y1={SUB_PAD_TOP - 7} x2={SUB_WIDTH - 10} y2={SUB_PAD_TOP - 7} stroke="#2c3a4d" strokeWidth={1} />
+      {/* 输入管脚名（方块内左侧） */}
+      {def.inputPins.map((pin, i) => (
+        <text
+          key={`in-${i}`}
+          x={8}
+          y={SUB_PAD_TOP + i * SUB_PIN_GAP + 4}
+          fontSize={10}
+          fill="#9fb0c3"
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+        >
+          {pin.name.length > 7 ? `${pin.name.slice(0, 6)}…` : pin.name}
+        </text>
+      ))}
+      {/* 输出管脚名（方块内右对齐） */}
+      {def.outputPins.map((pin, i) => (
+        <text
+          key={`out-${i}`}
+          x={SUB_WIDTH - 8}
+          y={SUB_PAD_TOP + i * SUB_PIN_GAP + 4}
+          textAnchor="end"
+          fontSize={10}
+          fill="#9fb0c3"
+          style={{ pointerEvents: 'none', userSelect: 'none' }}
+        >
+          {pin.name.length > 7 ? `${pin.name.slice(0, 6)}…` : pin.name}
+        </text>
+      ))}
     </g>
   );
 });

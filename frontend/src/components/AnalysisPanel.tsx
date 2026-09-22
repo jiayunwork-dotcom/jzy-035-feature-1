@@ -8,6 +8,7 @@ import {
 } from '../lib/api';
 import type {
   CircuitComponent,
+  DeviceDefinition,
   ExpressionOk,
   GenericErr,
   TruthTableOk
@@ -16,9 +17,10 @@ import type {
 interface Props {
   components: CircuitComponent[];
   circuit: { components: CircuitComponent[]; wires: import('../lib/types').Wire[] };
+  definitions: DeviceDefinition[];
 }
 
-export function AnalysisPanel({ components, circuit }: Props) {
+export function AnalysisPanel({ components, circuit, definitions }: Props) {
   const inputs = components.filter((c) => c.type === 'INPUT');
   const outputs = components.filter((c) => c.type === 'OUTPUT');
 
@@ -70,7 +72,7 @@ export function AnalysisPanel({ components, circuit }: Props) {
       const inputIds = orderIds(chosenInputs);
       const outputIds = orderIds(chosenOutputs);
 
-      const ttResult = await fetchTruthTable(circuit, inputIds, outputIds);
+      const ttResult = await fetchTruthTable(circuit, inputIds, outputIds, definitions);
       if (!ttResult.ok) {
         const e = ttResult as GenericErr;
         setError(e.message + (e.cyclePath ? '（已在图上标出环上元件）' : ''));
@@ -80,7 +82,7 @@ export function AnalysisPanel({ components, circuit }: Props) {
       setTt(ttResult);
       setLastQuery({ inputIds, outputIds });
 
-      const exprResult = await fetchExpressions(circuit, inputIds, outputIds);
+      const exprResult = await fetchExpressions(circuit, inputIds, outputIds, definitions);
       if (exprResult.ok) setExpr(exprResult);
     } finally {
       setBusy(false);
@@ -134,7 +136,7 @@ export function AnalysisPanel({ components, circuit }: Props) {
           <button
             className="ghost-btn"
             onClick={() =>
-              downloadTruthTableCsv(circuit, lastQuery.inputIds, lastQuery.outputIds)
+              downloadTruthTableCsv(circuit, lastQuery.inputIds, lastQuery.outputIds, definitions)
             }
           >
             导出 CSV

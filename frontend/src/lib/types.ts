@@ -9,7 +9,7 @@ export type GateType =
   | 'XOR'
   | 'XNOR';
 
-export type ComponentType = GateType | 'INPUT' | 'OUTPUT';
+export type ComponentType = GateType | 'INPUT' | 'OUTPUT' | 'SUB';
 
 export interface PortRef {
   componentId: string;
@@ -24,6 +24,8 @@ export interface CircuitComponent {
   label?: string;
   value?: 0 | 1;
   inputCount?: number;
+  /** SUB 实例引用的自定义器件 id */
+  deviceId?: string;
 }
 
 export interface Wire {
@@ -37,11 +39,32 @@ export interface Circuit {
   wires: Wire[];
 }
 
+/** 自定义器件对外管脚：绑定内部电路的一个 INPUT/OUTPUT 元件 */
+export interface DevicePin {
+  componentId: string;
+  name: string;
+}
+
+export interface DeviceDefinition {
+  id: string;
+  name: string;
+  inputPins: DevicePin[];
+  outputPins: DevicePin[];
+  circuit: Circuit;
+}
+
+export interface Project {
+  version: 2;
+  circuit: Circuit;
+  definitions: DeviceDefinition[];
+}
+
 export type Signal = 0 | 1 | null;
 
 export interface EvalResultOk {
   ok: true;
   outputs: Record<string, Signal>;
+  portOutputs?: Record<string, Signal>;
   wireValues: Record<string, Signal>;
   order: string[];
 }
@@ -49,7 +72,7 @@ export interface EvalResultOk {
 export interface EvalResultErr {
   ok: false;
   error: {
-    kind: 'cycle' | 'validation';
+    kind: 'cycle' | 'validation' | 'definition-cycle';
     path?: string[];
     message: string;
   };

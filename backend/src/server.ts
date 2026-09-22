@@ -17,12 +17,13 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { readFile } from 'node:fs/promises';
 import { extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { evaluate } from './core/evaluate.js';
+import { createHierarchyEngine } from './core/hierarchy.js';
+import { normalizeProject } from './core/serialization.js';
 import { buildTruthTable, truthTableToCsv } from './core/truthTable.js';
 import { extractExpressions } from './core/expression.js';
 import { buildKarnaugh } from './core/karnaugh.js';
 import { LEVELS, verifyLevel } from './core/levels.js';
-import type { Circuit } from './core/types.js';
+import type { Circuit, DeviceDefinition } from './core/types.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -75,7 +76,14 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
       sendJson(res, 400, { ok: false, message: '缺少 circuit' });
       return true;
     }
-    sendJson(res, 200, evaluate(circuit, data?.inputValues ?? undefined));
+    const definitions = (data?.definitions ?? []) as DeviceDefinition[];
+    // 实时求值：先走定义库校验 + 跨层环检测，再跨层传播
+    const created = createHierarchyEngine(definitions);
+    if (!created.ok) {
+      sendJson(res, 200, { ok: false, error: created.error });
+      return true;
+    }
+    sendJson(res, 200, created.engine.evaluate(circuit, data?.inputValues ?? undefined));
     return true;
   }
 
@@ -83,7 +91,8 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
     const result = buildTruthTable({
       circuit: data?.circuit,
       inputIds: data?.inputIds ?? [],
-      outputIds: data?.outputIds ?? []
+      outputIds: data?.outputIds ?? [],
+      definitions: data?.definitions ?? []
     });
     if (result.ok && data?.format === 'csv') {
       res.writeHead(200, {
@@ -102,7 +111,8 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
     const result = extractExpressions({
       circuit: data?.circuit,
       inputIds: data?.inputIds ?? [],
-      outputIds: data?.outputIds ?? []
+      outputIds: data?.outputIds ?? [],
+      definitions: data?.definitions ?? []
     });
     sendJson(res, result.ok ? 200 : 400, result);
     return true;
@@ -112,7 +122,8 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
     const result = buildKarnaugh({
       circuit: data?.circuit,
       inputIds: data?.inputIds ?? [],
-      outputId: data?.outputId
+      outputId: data?.outputId,
+      definitions: data?.definitions ?? []
     });
     sendJson(res, result.ok ? 200 : 400, result);
     return true;
@@ -134,8 +145,20 @@ async function handleApi(pathname: string, data: any, res: ServerResponse): Prom
   }
 
   if (pathname === '/api/levels/verify') {
-    const result = verifyLevel({ levelId: data?.levelId, circuit: data?.circuit });
+    const result = verifyLevel({
+      levelId: data?.levelId,
+      circuit: data?.circuit,
+      definitions: data?.definitions ?? []
+    });
     sendJson(res, result.ok === false ? 400 : 200, result);
+    return true;
+  }
+
+  // 工程文件归一化：供前端"读取"时统一识别新旧格式（也可直接在前端做，
+  // 此接口保证保存/读取语义以后端为准、便于测试）
+  if (pathname === '/api/project/normalize') {
+    const normalized = normalizeProject(data);
+    sendJson(res, normalized.error ? 400 : 200, normalized);
     return true;
   }
 

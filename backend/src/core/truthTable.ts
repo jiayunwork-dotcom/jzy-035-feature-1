@@ -9,9 +9,9 @@
  *  - n > MAX_TRUTH_TABLE_VARS 直接拒绝，避免后端做数亿次求值。
  */
 
-import { evaluate } from './evaluate.js';
 import { validateCircuit } from './graph.js';
-import type { Circuit, Signal } from './types.js';
+import { createHierarchyEngine, type HierarchyEngine } from './hierarchy.js';
+import type { Circuit, DeviceDefinition, Signal } from './types.js';
 
 export const TRUTH_TABLE_WARN_VARS = 10;
 export const MAX_TRUTH_TABLE_VARS = 20;
@@ -20,6 +20,8 @@ export interface TruthTableRequest {
   circuit: Circuit;
   inputIds: string[];
   outputIds: string[];
+  /** 自定义器件定义库；缺省/为空即按旧版扁平电路处理 */
+  definitions?: DeviceDefinition[];
 }
 
 export interface TruthTableRow {
@@ -50,9 +52,21 @@ export interface TruthTableErr {
 export type TruthTableResult = TruthTableOk | TruthTableErr;
 
 export function buildTruthTable(req: TruthTableRequest): TruthTableResult {
-  const { circuit, inputIds, outputIds } = req;
-  const v = validateCircuit(circuit);
+  const { circuit, inputIds, outputIds, definitions = [] } = req;
+  const v = validateCircuit(circuit, new Map(definitions.map((d) => [d.id, d])));
   if (v) return { ok: false, message: v.message };
+
+  // 分层求值引擎：定义库校验 + 跨层循环引用检测在穷举之前一次性完成；
+  // 没有定义时引擎等价于旧的扁平 evaluate。
+  const created = createHierarchyEngine(definitions);
+  if (!created.ok) {
+    return {
+      ok: false,
+      message: created.error.message,
+      cyclePath: created.error.kind === 'cycle' ? created.error.path : undefined
+    };
+  }
+  const engine: HierarchyEngine = created.engine;
 
   const compById = new Map(circuit.components.map((c) => [c.id, c]));
 
@@ -96,13 +110,11 @@ export function buildTruthTable(req: TruthTableRequest): TruthTableResult {
       inputAssignment[inputIds[i]] = bit as 0 | 1;
     }
 
-    const result = evaluate(circuit, inputAssignment);
+    const result = engine.evaluate(circuit, inputAssignment);
     if (!result.ok) {
       return {
         ok: false,
-        message: result.error.kind === 'cycle'
-          ? result.error.message
-          : result.error.message,
+        message: result.error.message,
         cyclePath: result.error.kind === 'cycle' ? result.error.path : undefined
       };
     }

@@ -4,11 +4,18 @@ import { useEffect, useState } from 'react';
 import { fetchLevels, verifyLevel } from '../lib/api';
 import type {
   Circuit,
+  DeviceDefinition,
   Level,
   LevelVerifyOk
 } from '../lib/types';
 
-export function LevelsPanel({ circuit }: { circuit: Circuit }) {
+export function LevelsPanel({
+  circuit,
+  definitions = []
+}: {
+  circuit: Circuit;
+  definitions?: DeviceDefinition[];
+}) {
   const [levels, setLevels] = useState<Level[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [result, setResult] = useState<LevelVerifyOk | null>(null);
@@ -27,7 +34,7 @@ export function LevelsPanel({ circuit }: { circuit: Circuit }) {
     setError(null);
     setResult(null);
     try {
-      const r = await verifyLevel(active.id, circuit);
+      const r = await verifyLevel(active.id, circuit, definitions);
       if (!r.ok) {
         setError(r.message);
       } else {

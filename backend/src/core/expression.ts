@@ -15,7 +15,7 @@ import {
   defaultVarName,
   type TruthTableResult
 } from './truthTable.js';
-import type { Circuit } from './types.js';
+import type { Circuit, DeviceDefinition } from './types.js';
 
 export interface OutputExpression {
   outputId: string;
@@ -48,6 +48,7 @@ export function extractExpressions(input: {
   circuit: Circuit;
   inputIds: string[];
   outputIds: string[];
+  definitions?: DeviceDefinition[];
 }): ExpressionResult {
   const tt: TruthTableResult = buildTruthTable(input);
   if (!tt.ok) {

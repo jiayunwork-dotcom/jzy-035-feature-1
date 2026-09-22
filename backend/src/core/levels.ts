@@ -5,9 +5,9 @@
  * 同一套拓扑求值内核，逐行与目标真值表比较，完全一致才算通过。
  */
 
-import { evaluate } from './evaluate.js';
 import { validateCircuit } from './graph.js';
-import type { Circuit } from './types.js';
+import { createHierarchyEngine } from './hierarchy.js';
+import type { Circuit, DeviceDefinition } from './types.js';
 
 export interface Level {
   id: string;
@@ -27,6 +27,8 @@ export interface Level {
 export interface LevelVerifyRequest {
   levelId: string;
   circuit: Circuit;
+  /** 学生工程里自定义的器件定义；缺省即旧版扁平提交 */
+  definitions?: DeviceDefinition[];
 }
 
 export interface LevelVerifyOk {
@@ -145,8 +147,20 @@ export function verifyLevel(req: LevelVerifyRequest): LevelVerifyResult {
   if (!level) return { ok: false, message: `关卡不存在: ${req.levelId}` };
 
   const circuit: Circuit = req.circuit;
-  const v = validateCircuit(circuit);
+  const definitions = req.definitions ?? [];
+  const v = validateCircuit(circuit, new Map(definitions.map((d) => [d.id, d])));
   if (v) return { ok: false, message: v.message };
+
+  // 分层引擎：学生用自定义器件搭出的电路一样走真实求值、逐行比对
+  const created = createHierarchyEngine(definitions);
+  if (!created.ok) {
+    return {
+      ok: false,
+      message: created.error.message,
+      cyclePath: created.error.kind === 'cycle' ? created.error.path : undefined
+    };
+  }
+  const engine = created.engine;
 
   // 按画面位置（先 x 后 y）排序，使变量/输出对应关系可预测
   const inputs = circuit.components
@@ -183,14 +197,11 @@ export function verifyLevel(req: LevelVerifyRequest): LevelVerifyResult {
     for (let i = 0; i < n; i++) {
       assignment[inputIds[i]] = ((m >> (n - 1 - i)) & 1) as 0 | 1;
     }
-    const result = evaluate(circuit, assignment);
+    const result = engine.evaluate(circuit, assignment);
     if (!result.ok) {
       return {
         ok: false,
-        message:
-          result.error.kind === 'cycle'
-            ? result.error.message
-            : result.error.message,
+        message: result.error.message,
         cyclePath: result.error.kind === 'cycle' ? result.error.path : undefined
       };
     }
